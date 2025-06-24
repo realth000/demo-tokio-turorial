@@ -7,7 +7,14 @@ use tokio::{
 async fn main() -> io::Result<()> {
     let listener = TcpListener::bind("127.0.0.1:6142").await?;
 
+    let mut work_rounds = 0;
+
     loop {
+        work_rounds += 1;
+        if work_rounds > 10 {
+            println!("time to take a rest");
+            break;
+        }
         let (mut socket, addr) = listener.accept().await?;
         tokio::spawn(async move {
             println!("accept addr: {:?}", addr);
