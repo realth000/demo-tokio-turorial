@@ -21,11 +21,21 @@ async fn main() -> io::Result<()> {
                 eprintln!("failed to write hello frame: {e:?}");
                 return;
             }
+            if let Err(e) = c.write_frame(&Frame::Integer(100)) {
+                eprintln!("failed to write integer frame: {e:?}");
+                return;
+            }
             println!("sender finished");
         }
 
+        let mut c = conn2.try_lock().unwrap();
+        let mut read_count = 2;
         loop {
-            let mut c = conn2.try_lock().unwrap();
+            read_count -= 1;
+            if read_count < 0 {
+                break;
+            }
+
             match c.read_frame() {
                 Ok(frame) => match frame {
                     Some(frame) => {

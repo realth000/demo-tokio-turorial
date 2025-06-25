@@ -7,7 +7,7 @@ use bytes::{Buf, BytesMut};
 use futures::executor::block_on;
 use mini_redis::{Frame, Result};
 use tokio::{
-    io::{AsyncReadExt, AsyncWriteExt},
+    io::{AsyncReadExt, AsyncWriteExt, BufWriter},
     net::TcpStream,
 };
 
@@ -38,17 +38,15 @@ impl Connection {
 }
 
 struct ConnectionInner {
-    stream: TcpStream,
+    stream: BufWriter<TcpStream>,
     buffer: BytesMut,
-    cursor: usize,
 }
 
 impl ConnectionInner {
     fn new(stream: TcpStream) -> Self {
         Self {
-            stream: stream,
+            stream: BufWriter::new(stream),
             buffer: BytesMut::with_capacity(1024),
-            cursor: 0,
         }
     }
 
@@ -56,33 +54,24 @@ impl ConnectionInner {
         loop {
             println!(">>> read_frame: parse frame");
             if let Some(frame) = self.parse_frame()? {
-                println!(">>> read_frame: got frame");
                 // Enough data for a frame, so the frame returned.
                 return Ok(Some(frame));
             }
 
-            if self.buffer.len() == self.cursor {
-                // Buffer is full, grow up.
-                self.buffer.resize(self.cursor * 2, 0);
-                println!(">>> read_frame: resize buffer to {}", self.cursor * 2);
-            }
+            println!(">>> read_frame: frame not complete");
 
-            println!(">>> read_frame: read stream ready");
-            let n = self.stream.read(&mut self.buffer[self.cursor..]).await?;
-            println!(">>> read_frame: read stream done: n={n}");
+            let n = self.stream.read_buf(&mut self.buffer).await?;
+            println!(">>> read_frame: read stream done: n={}", n);
 
             if n == 0 {
-                if self.cursor == 0 {
-                    println!(">>> read_frame: zero cursor, done");
-                    // No more data in buffer, try read more data from stream to buffer.
+                if self.buffer.is_empty() {
+                    println!(">>> read_frame: zero cursor, frame is done");
                     return Ok(None);
                 } else {
                     println!(">>> read_frame: have data");
                     // Still sending frame but unexpected close by peer.
                     return Err("connection reset by peer".into());
                 }
-            } else {
-                self.cursor += n;
             }
         }
     }
@@ -136,7 +125,17 @@ impl ConnectionInner {
                 Ok(Some(frame))
             }
             Err(mini_redis::frame::Error::Incomplete) => Ok(None),
-            Err(e) => Err(e.into()),
+            Err(e) => {
+                println!(
+                    ">>> parse_frame: invalid frame at pos={}({}), data={:?}, len={}",
+                    buf.position(),
+                    self.buffer[buf.position() as usize],
+                    // &self.buffer[..std::cmp::min(8, self.buffer.len())],
+                    &self.buffer,
+                    self.buffer.len()
+                );
+                Err(e.into())
+            }
         }
     }
 
