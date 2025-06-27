@@ -1,4 +1,5 @@
 use bytes::Bytes;
+use futures::StreamExt;
 use mini_redis::client;
 use tokio::sync::{mpsc, oneshot};
 
@@ -18,7 +19,40 @@ enum Command {
 }
 
 #[tokio::main]
-async fn main() {
+async fn main() -> mini_redis::Result<()> {
+    let args: Vec<String> = std::env::args().collect();
+    if Some("--stream") == args.get(1).map(|x| x.as_str()) {
+        println!("run stream example");
+
+        // Publish.
+        tokio::spawn(async {
+            let mut client = client::connect("127.0.0.1:6379").await.unwrap();
+            client.publish("numbers", "1".into()).await?;
+            client.publish("numbers", "2".into()).await?;
+            client.publish("numbers", "3".into()).await?;
+            client.publish("numbers", "4".into()).await?;
+            client.publish("numbers", "5".into()).await?;
+            return Ok::<_, mini_redis::Error>(());
+        });
+
+        // Subscribe.
+
+        let client = client::connect("127.0.0.1:6379").await?;
+        let subscriber = client.subscribe(vec!["numbers".to_string()]).await?;
+        let messages = subscriber
+            .into_stream()
+            .filter(|x| x.is_ok_and(|x| x.content.len() == 1))
+            .take(3);
+
+        tokio::pin!(messages);
+
+        while let Some(msg) = messages.next().await {
+            println!("got = {msg:?}");
+        }
+
+        return Ok(());
+    }
+
     let (tx, mut rx) = mpsc::channel::<Command>(32);
     let tx2 = tx.clone();
 
@@ -89,4 +123,6 @@ async fn main() {
     t1.await.unwrap();
     t2.await.unwrap();
     manager.await.unwrap();
+
+    Ok(())
 }
