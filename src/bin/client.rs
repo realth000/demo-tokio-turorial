@@ -1,7 +1,7 @@
 use bytes::Bytes;
-use futures::StreamExt;
 use mini_redis::client;
 use tokio::sync::{mpsc, oneshot};
+use tokio_stream::StreamExt;
 
 type Responder<T> = oneshot::Sender<mini_redis::Result<T>>;
 
@@ -41,7 +41,7 @@ async fn main() -> mini_redis::Result<()> {
         let subscriber = client.subscribe(vec!["numbers".to_string()]).await?;
         let messages = subscriber
             .into_stream()
-            .filter(|x| x.is_ok_and(|x| x.content.len() == 1))
+            .filter(|x| x.as_ref().unwrap().content.len() == 1)
             .take(3);
 
         tokio::pin!(messages);
